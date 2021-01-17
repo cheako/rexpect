@@ -1,14 +1,14 @@
 //! Main module of rexpect: start new process and interact with it
 
-use crate::process::PtyProcess;
-use crate::reader::{NBReader, Regex};
-pub use crate::reader::ReadUntil;
-use std::fs::File;
-use std::io::LineWriter;
-use std::process::Command;
-use std::io::prelude::*;
-use std::ops::{Deref, DerefMut};
 use crate::errors::*; // load error-chain
+use crate::process::PtyProcess;
+pub use crate::reader::ReadUntil;
+use crate::reader::{NBReader, Regex};
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::LineWriter;
+use std::ops::{Deref, DerefMut};
+use std::process::Command;
 use tempfile;
 
 pub struct StreamSession<W: Write> {
@@ -30,12 +30,12 @@ impl<W: Write> StreamSession<W> {
     /// returns number of written bytes
     pub fn send_line(&mut self, line: &str) -> Result<usize> {
         let mut len = self.send(line)?;
-        len += self.writer
+        len += self
+            .writer
             .write(&['\n' as u8])
             .chain_err(|| "cannot write newline")?;
         Ok(len)
     }
-
 
     /// Send string to process. As stdin of the process is most likely buffered, you'd
     /// need to call `flush()` after `send()` to make the process actually see your input.
@@ -45,6 +45,12 @@ impl<W: Write> StreamSession<W> {
         self.writer
             .write(s.as_bytes())
             .chain_err(|| "cannot write line to process")
+    }
+
+    pub fn send_bytes(&mut self, buf: &[u8]) -> Result<usize> {
+        self.writer
+            .write(buf)
+            .chain_err(|| "cannot write bytes to process")
     }
 
     /// Send a control code to the running process and consume resulting output line
@@ -71,7 +77,6 @@ impl<W: Write> StreamSession<W> {
             .chain_err(|| "cannot flush after sending ctrl keycode")?;
         Ok(())
     }
-
 
     /// Make sure all bytes written via `send()` are sent to the process
     pub fn flush(&mut self) -> Result<()> {
@@ -117,7 +122,10 @@ impl<W: Write> StreamSession<W> {
     /// Note that `exp_regex("^foo")` matches the start of the yet consumed output.
     /// For matching the start of the line use `exp_regex("\nfoo")`
     pub fn exp_regex(&mut self, regex: &str) -> Result<(String, String)> {
-        let res = self.exp(&ReadUntil::Regex(Regex::new(regex).chain_err(|| "invalid regex")?))
+        let res = self
+            .exp(&ReadUntil::Regex(
+                Regex::new(regex).chain_err(|| "invalid regex")?,
+            ))
             .and_then(|s| Ok(s));
         res
     }
@@ -126,6 +134,12 @@ impl<W: Write> StreamSession<W> {
     /// Return the yet unread output (without the matched string)
     pub fn exp_string(&mut self, needle: &str) -> Result<String> {
         self.exp(&ReadUntil::String(needle.to_string()))
+            .and_then(|(s, _)| Ok(s))
+    }
+
+    pub fn exp_bytes(&mut self, needle: Vec<u8>) -> Result<Vec<u8>> {
+        self.reader
+            .read_bytes_until(&ReadUntil::Bytes(needle))
             .and_then(|(s, _)| Ok(s))
     }
 
@@ -170,7 +184,6 @@ pub struct PtySession {
     pub commandname: String, // only for debugging purposes now
 }
 
-
 // make StreamSession's methods available directly
 impl Deref for PtySession {
     type Target = StreamSession<File>;
@@ -206,7 +219,6 @@ impl DerefMut for PtySession {
 /// ```
 impl PtySession {
     fn new(process: PtyProcess, timeout_ms: Option<u64>, commandname: String) -> Result<Self> {
-
         let f = process.get_file_handle();
         let reader = f.try_clone().chain_err(|| "couldn't open write stream")?;
         let stream = StreamSession::new(reader, f, timeout_ms);
@@ -257,8 +269,7 @@ pub fn spawn(program: &str, timeout_ms: Option<u64>) -> Result<PtySession> {
 /// See `spawn`
 pub fn spawn_command(command: Command, timeout_ms: Option<u64>) -> Result<PtySession> {
     let commandname = format!("{:?}", &command);
-    let mut process = PtyProcess::new(command)
-        .chain_err(|| "couldn't start process")?;
+    let mut process = PtyProcess::new(command).chain_err(|| "couldn't start process")?;
     process.set_kill_timeout(timeout_ms);
 
     PtySession::new(process, timeout_ms, commandname)
@@ -369,7 +380,6 @@ impl Drop for PtyReplSession {
     }
 }
 
-
 /// Spawn bash in a pty session, run programs and expect output
 ///
 ///
@@ -401,13 +411,23 @@ pub fn spawn_bash(timeout: Option<u64>) -> Result<PtyReplSession> {
     // would set as PS1 and we cannot know when is the right time
     // to set the new PS1
     let mut rcfile = tempfile::NamedTempFile::new().unwrap();
-    rcfile.write(b"include () { [[ -f \"$1\" ]] && source \"$1\"; }\n\
+    rcfile
+        .write(
+            b"include () { [[ -f \"$1\" ]] && source \"$1\"; }\n\
                   include /etc/bash.bashrc\n\
                   include ~/.bashrc\n\
                   PS1=\"~~~~\"\n\
-                  unset PROMPT_COMMAND\n").expect("cannot write to tmpfile");
+                  unset PROMPT_COMMAND\n",
+        )
+        .expect("cannot write to tmpfile");
     let mut c = Command::new("bash");
-    c.args(&["--rcfile", rcfile.path().to_str().unwrap_or_else(|| return "temp file does not exist".into())]);
+    c.args(&[
+        "--rcfile",
+        rcfile
+            .path()
+            .to_str()
+            .unwrap_or_else(|| return "temp file does not exist".into()),
+    ]);
     spawn_command(c, timeout).and_then(|p| {
         let new_prompt = "[REXPECT_PROMPT>";
         let mut pb = PtyReplSession {
@@ -417,7 +437,9 @@ pub fn spawn_bash(timeout: Option<u64>) -> Result<PtyReplSession> {
             echo_on: false,
         };
         pb.exp_string("~~~~")?;
-        rcfile.close().chain_err(|| "cannot delete temporary rcfile")?;
+        rcfile
+            .close()
+            .chain_err(|| "cannot delete temporary rcfile")?;
         pb.send_line(&("PS1='".to_string() + new_prompt + "'"))?;
         // wait until the new prompt appears
         pb.wait_for_prompt()?;
@@ -440,7 +462,11 @@ pub fn spawn_python(timeout: Option<u64>) -> Result<PtyReplSession> {
 }
 
 /// Spawn a REPL from a stream
-pub fn spawn_stream<R: Read + Send + 'static, W: Write>(reader: R, writer: W, timeout_ms: Option<u64>) -> StreamSession<W> {
+pub fn spawn_stream<R: Read + Send + 'static, W: Write>(
+    reader: R,
+    writer: W,
+    timeout_ms: Option<u64>,
+) -> StreamSession<W> {
     StreamSession::new(reader, writer, timeout_ms)
 }
 
@@ -454,15 +480,16 @@ mod tests {
             let mut s = spawn("cat", Some(1000))?;
             s.send_line("hans")?;
             assert_eq!("hans", s.read_line()?);
-            let should = crate::process::wait::WaitStatus::Signaled(s.process.child_pid,
-                                                               crate::process::signal::Signal::SIGTERM,
-                                                               false);
+            let should = crate::process::wait::WaitStatus::Signaled(
+                s.process.child_pid,
+                crate::process::signal::Signal::SIGTERM,
+                false,
+            );
             assert_eq!(should, s.process.exit()?);
             Ok(())
         }()
-                .unwrap_or_else(|e| panic!("test_read_line failed: {}", e));
+        .unwrap_or_else(|e| panic!("test_read_line failed: {}", e));
     }
-
 
     #[test]
     fn test_expect_eof_timeout() {
@@ -472,11 +499,10 @@ mod tests {
                 Ok(_) => assert!(false, "should raise Timeout"),
                 Err(Error(ErrorKind::Timeout(_, _, _), _)) => {}
                 Err(_) => assert!(false, "should raise TimeOut"),
-
             }
             Ok(())
         }()
-                .unwrap_or_else(|e| panic!("test_timeout failed: {}", e));
+        .unwrap_or_else(|e| panic!("test_timeout failed: {}", e));
     }
 
     #[test]
@@ -495,7 +521,7 @@ mod tests {
             p.exp_string("hello heaven!")?;
             Ok(())
         }()
-                .unwrap_or_else(|e| panic!("test_expect_string failed: {}", e));
+        .unwrap_or_else(|e| panic!("test_expect_string failed: {}", e));
     }
 
     #[test]
@@ -506,7 +532,7 @@ mod tests {
             assert_eq!("lorem ipsum dolor sit ", p.exp_string("amet")?);
             Ok(())
         }()
-                .unwrap_or_else(|e| panic!("test_read_string_before failed: {}", e));
+        .unwrap_or_else(|e| panic!("test_read_string_before failed: {}", e));
     }
 
     #[test]
@@ -514,13 +540,16 @@ mod tests {
         || -> Result<()> {
             let mut p = spawn("cat", Some(1000)).expect("cannot run cat");
             p.send_line("Hi")?;
-            match p.exp_any(vec![ReadUntil::NBytes(3), ReadUntil::String("Hi".to_string())]) {
+            match p.exp_any(vec![
+                ReadUntil::NBytes(3),
+                ReadUntil::String("Hi".to_string()),
+            ]) {
                 Ok(s) => assert_eq!(("".to_string(), "Hi\r".to_string()), s),
                 Err(e) => assert!(false, format!("got error: {}", e)),
             }
             Ok(())
         }()
-                .unwrap_or_else(|e| panic!("test_expect_any failed: {}", e));
+        .unwrap_or_else(|e| panic!("test_expect_any failed: {}", e));
     }
 
     #[test]
@@ -539,7 +568,8 @@ mod tests {
             let mut p = spawn_bash(Some(1000))?;
             p.execute("cat <(echo ready) -", "ready")?;
             Ok(())
-        }().unwrap_or_else(|e| panic!("test_kill_timeout failed: {}", e));
+        }()
+        .unwrap_or_else(|e| panic!("test_kill_timeout failed: {}", e));
         // p is dropped here and kill is sent immediately to bash
         // Since that is not enough to make bash exit, a kill -9 is sent within 1s (timeout)
     }
@@ -554,7 +584,7 @@ mod tests {
             assert_eq!("/tmp\r\n", p.wait_for_prompt()?);
             Ok(())
         }()
-                .unwrap_or_else(|e| panic!("test_bash failed: {}", e));
+        .unwrap_or_else(|e| panic!("test_bash failed: {}", e));
     }
 
     #[test]
@@ -572,7 +602,7 @@ mod tests {
             p.send_control('c')?;
             Ok(())
         }()
-                .unwrap_or_else(|e| panic!("test_bash_control_chars failed: {}", e));
+        .unwrap_or_else(|e| panic!("test_bash_control_chars failed: {}", e));
     }
 
     #[test]

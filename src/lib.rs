@@ -79,22 +79,26 @@
 //! ```
 
 pub mod process;
-pub mod session;
 pub mod reader;
+pub mod session;
 
-pub use session::{spawn, spawn_bash, spawn_python, spawn_stream};
 pub use reader::ReadUntil;
+pub use session::{spawn, spawn_bash, spawn_python, spawn_stream};
 
 pub mod errors {
     use std::time;
     // Create the Error, ErrorKind, ResultExt, and Result types
-    error_chain::error_chain!{
+    error_chain::error_chain! {
         errors {
-            EOF(expected:String, got:String, exit_code:Option<String>) {
+            EOF(expected:String, got:Vec<u8>, exit_code:Option<String>) {
                 description("End of filestream (usually stdout) occurred, most probably\
                              because the process terminated")
-                display("EOF (End of File): Expected {} but got EOF after reading \"{}\", \
-                             process terminated with {:?}", expected, got,
+                display("EOF (End of File): Expected {} but got EOF after reading {}, \
+                             process terminated with {:?}", expected,
+                             match std::str::from_utf8(got) {
+                                 Ok(x) => format!("\"{}\"", x),
+                                 Err(_) => format!("{:x?}", got),
+                             },
                              exit_code.as_ref()
                              .unwrap_or(& "unknown".to_string()))
             }
