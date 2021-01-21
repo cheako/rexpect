@@ -293,7 +293,7 @@ impl NBReader {
 
     /// Try to read one char from internal buffer. Returns None if
     /// no char is ready, Some(char) otherwise. This is non-blocking
-    pub fn try_read_bytes(&mut self) -> Option<u8> {
+    pub fn try_read_byte(&mut self) -> Option<u8> {
         // discard eventual errors, EOF will be handled in read_until correctly
         let _ = self.read_into_buffer();
         if self.buffer.len() > 0 {

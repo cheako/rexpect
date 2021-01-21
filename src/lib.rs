@@ -85,6 +85,11 @@ pub mod session;
 pub use reader::ReadUntil;
 pub use session::{spawn, spawn_bash, spawn_python, spawn_stream};
 
+#[cfg(feature = "use_tokio")]
+pub mod _async;
+#[cfg(feature = "use_tokio")]
+pub use _async::spawn_async_stream;
+
 pub mod errors {
     use std::time;
     // Create the Error, ErrorKind, ResultExt, and Result types
